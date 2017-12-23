@@ -13,6 +13,11 @@ android {
         targetSdkVersion 22
         versionCode 23
         versionName "1.2.5"
+		
+		lintOptions {
+          abortOnError false
+      }
+
         android {
             defaultConfig {
                 ndk {
