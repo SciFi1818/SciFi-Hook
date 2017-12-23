@@ -1,6 +1,6 @@
 #include "jni.h"
 #include <string.h>
-
+#include <stdint.h>
 #include "common.h"
 #include "env.h"
 #include "trampoline.h"
