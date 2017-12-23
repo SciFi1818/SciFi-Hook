@@ -45,4 +45,4 @@ licenses:
   - 'google-gdk-license-.+'
   
 after_success:
-- sh set_tags.sh
+  - sh deploy.sh
