@@ -20,7 +20,7 @@ before_install:
   - git submodule update
   
 before_install:
-  - yes | sdkmanager "platforms;android-25"
+  - yes | sdkmanager "platforms;android-21"
   - chmod +x gradlew
 
 #script:
