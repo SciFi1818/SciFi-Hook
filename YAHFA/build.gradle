@@ -8,6 +8,9 @@ android {
         targetSdkVersion 23
         versionCode 1
         versionName "1.0"
+		lintOptions {
+          abortOnError false
+      }
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         ndk {
             // Specifies the ABI configurations of your native
