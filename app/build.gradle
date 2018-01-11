@@ -2,6 +2,10 @@ apply plugin: 'com.android.application'
 
 
 android {
+	lintOptions {
+        //IJobService need NewApi
+        abortOnError false
+    }
     compileSdkVersion 25
     buildToolsVersion '27.0.2'
     defaultConfig {
@@ -36,14 +40,6 @@ android {
     }
 }
 
-android {
-    lintOptions {
-        checkReleaseBuilds false
-        // Or, if you prefer, you can continue to check for errors in release builds,
-        // but continue the build even when errors are found:
-        abortOnError false
-    }
-}
 
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
