@@ -2,7 +2,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <stdlib.h>
-
+#include <stdint.h>
 #include "common.h"
 #include "env.h"
 #include "trampoline.h"
