@@ -30,25 +30,27 @@ import com.lody.virtual.client.fixer.ContextFixer;
 import com.lody.virtual.client.hook.delegate.ComponentDelegate;
 import com.lody.virtual.client.hook.delegate.PhoneInfoDelegate;
 import com.lody.virtual.client.hook.delegate.TaskDescriptionDelegate;
-import com.lody.virtual.client.ipc.LocalProxyUtils;
 import com.lody.virtual.client.ipc.ServiceManagerNative;
 import com.lody.virtual.client.ipc.VActivityManager;
 import com.lody.virtual.client.ipc.VPackageManager;
-import com.lody.virtual.client.stub.StubManifest;
+import com.lody.virtual.client.stub.VASettings;
 import com.lody.virtual.helper.compat.BundleCompat;
+import com.lody.virtual.helper.ipcbus.IPCBus;
+import com.lody.virtual.helper.ipcbus.IPCSingleton;
+import com.lody.virtual.helper.ipcbus.IServerCache;
 import com.lody.virtual.helper.utils.BitmapUtils;
-import com.lody.virtual.helper.utils.VLog;
-import com.lody.virtual.os.VEnvironment;
 import com.lody.virtual.os.VUserHandle;
 import com.lody.virtual.remote.InstallResult;
 import com.lody.virtual.remote.InstalledAppInfo;
-import com.lody.virtual.server.IAppManager;
+import com.lody.virtual.server.interfaces.IAppManager;
+import com.lody.virtual.server.ServiceCache;
 import com.lody.virtual.server.interfaces.IAppRequestListener;
+import com.lody.virtual.server.interfaces.IPackageObserver;
+import com.lody.virtual.server.interfaces.IUiCallback;
 
 import java.io.IOException;
 import java.util.List;
 
-import dalvik.system.DexClassLoader;
 import dalvik.system.DexFile;
 import mirror.android.app.ActivityThread;
 
@@ -85,7 +87,7 @@ public final class VirtualCore {
      */
     private String processName;
     private ProcessType processType;
-    private IAppManager mService;
+    private IPCSingleton<IAppManager> singleton = new IPCSingleton<>(IAppManager.class);
     private boolean isStartUp;
     private PackageInfo hostPkgInfo;
     private int systemPid;
@@ -175,12 +177,23 @@ public final class VirtualCore {
             if (Looper.myLooper() != Looper.getMainLooper()) {
                 throw new IllegalStateException("VirtualCore.startup() must called in main thread.");
             }
-            StubManifest.STUB_CP_AUTHORITY = context.getPackageName() + "." + StubManifest.STUB_DEF_AUTHORITY;
+            VASettings.STUB_CP_AUTHORITY = context.getPackageName() + "." + VASettings.STUB_DEF_AUTHORITY;
             ServiceManagerNative.SERVICE_CP_AUTH = context.getPackageName() + "." + ServiceManagerNative.SERVICE_DEF_AUTH;
             this.context = context;
             mainThread = ActivityThread.currentActivityThread.call();
             unHookPackageManager = context.getPackageManager();
             hostPkgInfo = unHookPackageManager.getPackageInfo(context.getPackageName(), PackageManager.GET_PROVIDERS);
+            IPCBus.initialize(new IServerCache() {
+                @Override
+                public void join(String serverName, IBinder binder) {
+                    ServiceCache.addService(serverName, binder);
+                }
+
+                @Override
+                public IBinder query(String serverName) {
+                    return ServiceManagerNative.getService(serverName);
+                }
+            });
             detectProcessType();
             InvocationStubManager invocationStubManager = InvocationStubManager.getInstance();
             invocationStubManager.init();
@@ -255,20 +268,7 @@ public final class VirtualCore {
     }
 
     private IAppManager getService() {
-        if (mService == null) {
-            synchronized (this) {
-                if (mService == null) {
-                    Object remote = getStubInterface();
-                    mService = LocalProxyUtils.genProxy(IAppManager.class, remote);
-                }
-            }
-        }
-        return mService;
-    }
-
-    private Object getStubInterface() {
-        return IAppManager.Stub
-                .asInterface(ServiceManagerNative.getService(ServiceManagerNative.APP));
+        return singleton.get();
     }
 
     /**
@@ -319,17 +319,11 @@ public final class VirtualCore {
      * @param pkg package name
      * @throws IOException
      */
+    @Deprecated
     public void preOpt(String pkg) throws IOException {
         InstalledAppInfo info = getInstalledAppInfo(pkg, 0);
         if (info != null && !info.dependSystem) {
-            VLog.w("native", "load dex of "+info.apkPath+" to odex "+info.getOdexFile().getPath());
             DexFile.loadDex(info.apkPath, info.getOdexFile().getPath(), 0).close();
-         /*
-            DexClassLoader dexClassLoader = new DexClassLoader(info.apkPath,
-                    info.getOdexFile().getParent(),
-                    null,
-                    ClassLoader.getSystemClassLoader());
-                    */
         }
     }
 
@@ -457,7 +451,7 @@ public final class VirtualCore {
         }
         shortcutIntent.putExtra("_VA_|_intent_", targetIntent);
         shortcutIntent.putExtra("_VA_|_uri_", targetIntent.toUri(0));
-        shortcutIntent.putExtra("_VA_|_user_id_", VUserHandle.myUserId());
+        shortcutIntent.putExtra("_VA_|_user_id_", userId);
 
         Intent addIntent = new Intent();
         addIntent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
@@ -520,6 +514,17 @@ public final class VirtualCore {
         if (token != null) {
             Bundle bundle = new Bundle();
             BundleCompat.putBinder(bundle, "_VA_|_loading_token_", token);
+            intent.putExtra("_VA_|_sender_", bundle);
+        }
+    }
+
+    public abstract static class UiCallback extends IUiCallback.Stub {
+    }
+
+    public void setUiCallback(Intent intent, IUiCallback callback) {
+        if (callback != null) {
+            Bundle bundle = new Bundle();
+            BundleCompat.putBinder(bundle, "_VA_|_ui_callback_", callback.asBinder());
             intent.putExtra("_VA_|_sender_", bundle);
         }
     }
@@ -721,6 +726,25 @@ public final class VirtualCore {
             return getService().getPackageInstalledUsers(packageName);
         } catch (RemoteException e) {
             return VirtualRuntime.crash(e);
+        }
+    }
+
+    public abstract static class PackageObserver extends IPackageObserver.Stub {
+    }
+
+    public void registerObserver(IPackageObserver observer) {
+        try {
+            getService().registerObserver(observer);
+        } catch (RemoteException e) {
+            VirtualRuntime.crash(e);
+        }
+    }
+
+    public void unregisterObserver(IPackageObserver observer) {
+        try {
+            getService().unregisterObserver(observer);
+        } catch (RemoteException e) {
+            VirtualRuntime.crash(e);
         }
     }
 
